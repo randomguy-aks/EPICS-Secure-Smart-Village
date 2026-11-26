@@ -1,4 +1,3 @@
-
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -32,17 +31,21 @@ def add_to_cart(request, product_id):
         seller__is_active=True
     )
 
-    inventory = Inventory.objects.filter(product=product).first()
-
-    if not inventory or inventory.quantity < 1:
-        messages.error(request, 'This product is currently out of stock.')
-        return redirect('product_detail', product_id=product.id)
-
     cart, created = Cart.objects.get_or_create(
         consumer=request.user
     )
 
+    # Lock the inventory row before checking stock. This serializes concurrent
+    # additions for the same product and avoids relying on a stale stock read.
     with transaction.atomic():
+        inventory = Inventory.objects.select_for_update().filter(
+            product=product
+        ).first()
+
+        if not inventory or inventory.quantity < 1:
+            messages.error(request, 'This product is currently out of stock.')
+            return redirect('product_detail', product_id=product.id)
+
         item = CartItem.objects.select_for_update().filter(
             cart=cart,
             product=product
@@ -56,7 +59,7 @@ def add_to_cart(request, product_id):
 
         if item:
             item.quantity += 1
-            item.save()
+            item.save(update_fields=['quantity'])
         else:
             CartItem.objects.create(
                 cart=cart,
@@ -106,21 +109,26 @@ def update_cart_quantity(request, item_id):
     action = request.POST.get('action')
 
     if action == 'increase':
-        inventory = Inventory.objects.filter(
-            product=item.product
-        ).first()
+        with transaction.atomic():
+            inventory = Inventory.objects.select_for_update().filter(
+                product=item.product
+            ).first()
+            item = CartItem.objects.select_for_update().get(
+                id=item.id,
+                cart=cart
+            )
 
-        if not inventory or item.quantity >= inventory.quantity:
-            messages.error(request, 'Maximum available stock reached.')
-            return redirect('cart')
+            if not inventory or item.quantity >= inventory.quantity:
+                messages.error(request, 'Maximum available stock reached.')
+                return redirect('cart')
 
-        item.quantity += 1
-        item.save()
+            item.quantity += 1
+            item.save(update_fields=['quantity'])
 
     elif action == 'decrease':
         if item.quantity > 1:
             item.quantity -= 1
-            item.save()
+            item.save(update_fields=['quantity'])
         else:
             messages.warning(
                 request,
