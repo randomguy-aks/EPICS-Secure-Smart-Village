@@ -1,4 +1,3 @@
-
 from django.shortcuts import render, redirect
 from django.contrib.auth.decorators import login_required
 
@@ -8,14 +7,22 @@ from .models import SellerProfile
 
 @login_required
 def seller_dashboard(request):
-
-    if not AccountProfile.objects.filter(
+    account = AccountProfile.objects.filter(
         user=request.user,
         role='seller'
-    ).exists():
+    ).first()
+
+    if not account:
         return redirect('home')
 
-    seller = SellerProfile.objects.get(user=request.user)
+    # Inactive seller profiles must not access seller-management pages.
+    seller = SellerProfile.objects.filter(
+        user=request.user,
+        is_active=True
+    ).first()
+
+    if not seller:
+        return redirect('home')
 
     products = seller.products.select_related(
         'category'

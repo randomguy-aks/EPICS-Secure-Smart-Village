@@ -1,6 +1,5 @@
-
 from django import forms
-from .models import Product
+from .models import Product, Category
 
 
 class ProductForm(forms.ModelForm):
@@ -31,6 +30,13 @@ class ProductForm(forms.ModelForm):
                 'step': '0.01'
             })
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Do not allow new products to be assigned to disabled categories.
+        self.fields['category'].queryset = Category.objects.filter(
+            is_active=True
+        )
 
     def clean_price(self):
         price = self.cleaned_data['price']
